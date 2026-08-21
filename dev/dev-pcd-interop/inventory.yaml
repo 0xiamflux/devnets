@@ -1,0 +1,125 @@
+# Minimal inventory for the my-devnet manifest.
+#
+# Node names are capped at 10 chars (MaxNodeNameLength), hence "seq-0"/"sn-0".
+# Machine specs are omitted so the generators fall back to their defaults.
+chains:
+  # chains[0] <-> manifest l2.chains[0] (my-devnet-0). The lists are index-matched,
+  # so the chain count here must equal the manifest's.
+  - nodes:
+      # One sequencer: a count of exactly 1 is valid and skips the Raft/conductor
+      # requirement (op-conductor-ops + op-conductor-mon are only mandatory at 3+).
+      - kind: "node"
+        name: "seq-0"
+        spec:
+          kind: "sequencer"
+          el:
+            kind: "op-geth"
+            spec:
+              kind: "full"
+          cl:
+            kind: "op-node"
+
+      # Archive, because op-interop-filter does historical log lookups and every
+      # node in its deps.nodes must be archive.
+      - kind: "node"
+        name: "rpc-0"
+        spec:
+          kind: "rpc"
+          el:
+            kind: "op-geth"
+            spec:
+              kind: "archive"
+          cl:
+            kind: "op-node"
+
+      # EL for the supernode service below. supernode-el nodes must not declare a
+      # cl: the CL is the op-supernode service itself.
+      - kind: "node"
+        name: "sn-0"
+        spec:
+          kind: "supernode-el"
+          el:
+            kind: "op-geth"
+            spec:
+              kind: "full"
+
+    services:
+      # op-batcher, peer-mgmt-service and proxyd are required in every chain.
+      - kind: "batcher"
+        name: "op-batcher"
+        spec:
+          kind: "op-batcher"
+        deps:
+          nodes:
+            - "seq-0"
+
+      - kind: "public-rpc"
+        name: "proxyd-public"
+        spec:
+          kind: "proxyd"
+        deps:
+          nodes:
+            - "rpc-0"
+          services:
+            - "op-interop-filter-0"
+
+      - kind: "peer-mgmt-service"
+        name: "peer-mgmt-service"
+        spec:
+          kind: "peer-mgmt-service"
+        deps:
+          nodes:
+            - "seq-0"
+            - "rpc-0"
+
+      # fp-permissionless needs the proposer/challenger/dispute-mon trio. On an
+      # interop network all three read the super root from the supernode, so they
+      # depend on op-supernode-0 as well as the archive RPC.
+      - kind: "proposer"
+        name: "op-proposer"
+        spec:
+          kind: "op-proposer"
+        deps:
+          nodes:
+            - "rpc-0"
+          services:
+            - "op-supernode-0"
+
+      - kind: "challenger"
+        name: "op-challenger"
+        spec:
+          kind: "op-challenger"
+        deps:
+          nodes:
+            - "rpc-0"
+          services:
+            - "op-supernode-0"
+
+      - kind: "op-dispute-mon"
+        name: "op-dispute-mon"
+        spec:
+          kind: "op-dispute-mon"
+        deps:
+          nodes:
+            - "rpc-0"
+          services:
+            - "op-supernode-0"
+
+# Network-level services span all chains.
+services:
+  # Required by the network-level interop feature.
+  - kind: "interop-filter"
+    name: "op-interop-filter-0"
+    spec:
+      kind: "op-interop-filter"
+    deps:
+      nodes:
+        - "rpc-0"
+
+  - kind: "supernode"
+    name: "op-supernode-0"
+    spec:
+      kind: "op-supernode"
+    deps:
+      nodes:
+        - "sn-0"
